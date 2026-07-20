@@ -1,0 +1,117 @@
+// Prisma schema for clip-me
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  passwordHash String
+  createdAt    DateTime      @default(now())
+  sourceVideos SourceVideo[]
+}
+
+enum SourceVideoStatus {
+  PENDING
+  DOWNLOADING
+  DOWNLOADED
+  TRANSCRIBING
+  TRANSCRIBED
+  SUGGESTING
+  SUGGESTED
+  FAILED
+}
+
+model SourceVideo {
+  id              String            @id @default(cuid())
+  userId          String
+  user            User              @relation(fields: [userId], references: [id])
+  youtubeUrl      String
+  youtubeVideoId  String?
+  title           String?
+  durationSeconds Float?
+  thumbnailUrl    String?
+  localFilePath   String?
+  localAudioPath  String?
+  status          SourceVideoStatus @default(PENDING)
+  errorMessage    String?
+  transcript      String? // JSON-encoded Segment[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  suggestedClips  SuggestedClip[]
+  jobs            Job[]
+}
+
+enum SuggestedClipStatus {
+  SUGGESTED
+  ACCEPTED
+  REJECTED
+}
+
+model SuggestedClip {
+  id            String              @id @default(cuid())
+  sourceVideoId String
+  sourceVideo   SourceVideo         @relation(fields: [sourceVideoId], references: [id])
+  startSeconds  Float
+  endSeconds    Float
+  title         String
+  rationale     String
+  status        SuggestedClipStatus @default(SUGGESTED)
+  createdAt     DateTime            @default(now())
+  exportedClips ExportedClip[]
+}
+
+enum ExportedClipStatus {
+  PENDING
+  RENDERING
+  READY
+  FAILED
+}
+
+model ExportedClip {
+  id              String              @id @default(cuid())
+  suggestedClipId String
+  suggestedClip   SuggestedClip       @relation(fields: [suggestedClipId], references: [id])
+  startSeconds    Float
+  endSeconds      Float
+  status          ExportedClipStatus  @default(PENDING)
+  localFilePath   String?
+  errorMessage    String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  jobs            Job[]
+}
+
+enum JobType {
+  DOWNLOAD
+  TRANSCRIBE
+  SUGGEST
+  EXPORT
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+model Job {
+  id              String        @id @default(cuid())
+  type            JobType
+  status          JobStatus     @default(QUEUED)
+  error           String?
+  sourceVideoId   String?
+  sourceVideo     SourceVideo?  @relation(fields: [sourceVideoId], references: [id])
+  exportedClipId  String?
+  exportedClip    ExportedClip? @relation(fields: [exportedClipId], references: [id])
+  createdAt       DateTime      @default(now())
+  startedAt       DateTime?
+  finishedAt      DateTime?
+}
