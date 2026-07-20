@@ -45,6 +45,7 @@ next-env.d.ts
 /prisma/dev.db
 /prisma/dev.db-journal
 
-# app runtime media + local whisper.cpp model
+# app runtime media + local whisper.cpp build + model
 /storage/
 /models/
+/whisper.cpp

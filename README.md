@@ -19,18 +19,25 @@ Everything runs locally. No paid API keys are required for this MVP.
 You need three system binaries on your `PATH` (none of this is npm-installable):
 
 - **[ffmpeg](https://ffmpeg.org/)** — `apt install ffmpeg` / `brew install ffmpeg`
-- **[yt-dlp](https://github.com/yt-dlp/yt-dlp)** — `pipx install yt-dlp` (recommended over distro packages, which lag behind)
-- **[whisper.cpp](https://github.com/ggml-org/whisper.cpp)** — build from source:
+- **[yt-dlp](https://github.com/yt-dlp/yt-dlp)** — `pipx install yt-dlp`
+  (recommended over distro packages, which lag behind). If `yt-dlp` isn't
+  found afterward, run `pipx ensurepath` and open a new shell —
+  `~/.local/bin` needs to be on your `PATH`.
+- **[whisper.cpp](https://github.com/ggml-org/whisper.cpp)** — build from
+  source, **from the root of this repo** (the default `WHISPER_CPP_BIN` in
+  `.env.example` assumes it lives at `./whisper.cpp`; the directory is
+  gitignored so it's safe to clone here):
 
   ```bash
   git clone https://github.com/ggml-org/whisper.cpp.git
   cd whisper.cpp
   cmake -B build -DCMAKE_BUILD_TYPE=Release
   cmake --build build -j
+  cd ..
   ```
 
-  This produces `build/bin/whisper-cli`. Point `WHISPER_CPP_BIN` in `.env` at
-  it (see below).
+  This produces `whisper.cpp/build/bin/whisper-cli`. If you build it
+  somewhere else instead, set `WHISPER_CPP_BIN` in `.env` to that path.
 
 ## Setup
 
