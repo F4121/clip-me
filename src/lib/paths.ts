@@ -19,7 +19,7 @@ export function exportedClipDir(exportedClipId: string) {
 }
 
 export function exportedClipCaptionsPath(exportedClipId: string) {
-  return path.join(exportedClipDir(exportedClipId), "captions.srt");
+  return path.join(exportedClipDir(exportedClipId), "captions.ass");
 }
 
 export function exportedClipOutputPath(exportedClipId: string) {

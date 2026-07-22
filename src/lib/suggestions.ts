@@ -1,4 +1,4 @@
-import { runFfmpeg } from "@/lib/ffmpeg";
+import { runFfmpeg, measureLoudness } from "@/lib/ffmpeg";
 import { isNonSpeechAnnotation } from "@/lib/subtitles";
 import type { ClipSuggestion, TranscriptSegment } from "@/types";
 
@@ -104,28 +104,6 @@ async function detectSilence(audioPath: string): Promise<Interval[]> {
     intervals.push({ start: starts[i], end: ends[i] });
   }
   return intervals;
-}
-
-async function measureLoudness(
-  audioPath: string,
-  start: number,
-  duration: number,
-): Promise<number> {
-  const stderr = await runFfmpeg([
-    "-ss",
-    String(start),
-    "-t",
-    String(duration),
-    "-i",
-    audioPath,
-    "-af",
-    "volumedetect",
-    "-f",
-    "null",
-    "-",
-  ]);
-  const match = stderr.match(/mean_volume:\s*(-?[\d.]+)\s*dB/);
-  return match ? parseFloat(match[1]) : -Infinity;
 }
 
 function buildCandidateWindows(durationSeconds: number): Interval[] {

@@ -1,8 +1,10 @@
 import fs from "node:fs/promises";
 import { db } from "@/lib/db";
 import { ExportedClipStatus } from "@prisma/client";
-import { buildSrt } from "@/lib/subtitles";
+import { buildAss, groupIntoCaptionPhrases } from "@/lib/subtitles";
 import { exportVerticalClip } from "@/lib/ffmpeg";
+import { detectZoomMoments } from "@/lib/zoomEffects";
+import { ensureWhooshSfx } from "@/lib/soundEffects";
 import {
   exportedClipDir,
   exportedClipCaptionsPath,
@@ -29,13 +31,29 @@ export async function runExportClip(exportedClipId: string): Promise<void> {
   try {
     await fs.mkdir(exportedClipDir(exportedClipId), { recursive: true });
 
-    let srtPath: string | null = null;
+    const clipDurationSeconds = exportedClip.endSeconds - exportedClip.startSeconds;
+
+    let assPath: string | null = null;
     if (sourceVideo.transcript) {
-      const segments: TranscriptSegment[] = JSON.parse(sourceVideo.transcript);
-      const srt = buildSrt(segments, exportedClip.startSeconds, exportedClip.endSeconds);
-      if (srt.trim().length > 0) {
-        srtPath = exportedClipCaptionsPath(exportedClipId);
-        await fs.writeFile(srtPath, srt, "utf-8");
+      const words: TranscriptSegment[] = JSON.parse(sourceVideo.transcript);
+      const phrases = groupIntoCaptionPhrases(words);
+      const ass = buildAss(phrases, exportedClip.startSeconds, exportedClip.endSeconds);
+      if (ass.trim().length > 0) {
+        assPath = exportedClipCaptionsPath(exportedClipId);
+        await fs.writeFile(assPath, ass, "utf-8");
+      }
+    }
+
+    let zoomTimestamps: number[] = [];
+    let whooshPath: string | null = null;
+    if (sourceVideo.localAudioPath) {
+      zoomTimestamps = await detectZoomMoments(
+        sourceVideo.localAudioPath,
+        exportedClip.startSeconds,
+        clipDurationSeconds,
+      );
+      if (zoomTimestamps.length > 0) {
+        whooshPath = await ensureWhooshSfx();
       }
     }
 
@@ -44,8 +62,10 @@ export async function runExportClip(exportedClipId: string): Promise<void> {
       sourcePath: sourceVideo.localFilePath,
       outputPath,
       startSeconds: exportedClip.startSeconds,
-      durationSeconds: exportedClip.endSeconds - exportedClip.startSeconds,
-      srtPath,
+      durationSeconds: clipDurationSeconds,
+      assPath,
+      zoomTimestamps,
+      whooshPath,
     });
 
     await db.exportedClip.update({

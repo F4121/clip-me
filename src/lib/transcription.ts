@@ -39,6 +39,12 @@ export async function transcribeAudio(
       outputBase,
       "-np",
       "-nt",
+      // Force near-word-level segmentation (rather than whole sentences) so
+      // captions can be grouped into short, punchy phrases with tight
+      // per-word timing instead of one long line per sentence.
+      "-ml",
+      "1",
+      "-sow",
     ]);
     let stderr = "";
     child.stderr.on("data", (chunk) => (stderr += chunk));

@@ -6,11 +6,13 @@ caption-burned clips.
 Paste a YouTube URL and the app will:
 
 1. Download the video locally (`yt-dlp`)
-2. Transcribe it locally (`whisper.cpp` — free, no API key)
+2. Transcribe it locally, word-by-word (`whisper.cpp` — free, no API key)
 3. Suggest a few 30–60s candidate clips using a free audio heuristic
    (silence + loudness analysis — no LLM)
 4. Let you preview and trim each suggestion on a timeline
-5. Export a vertical (9:16) MP4 with burned-in captions
+5. Export a vertical (9:16) MP4 with:
+   - Bold, word-by-word "punch" captions (short phrases, not full sentences)
+   - A brief punch-zoom + whoosh sound effect on loud/emphasis moments
 
 Everything runs locally. No paid API keys are required for this MVP.
 
@@ -85,8 +87,20 @@ See `.env.example`. The MVP needs no paid API keys — `OPENAI_API_KEY` /
   `volumedetect` over candidate windows is used as a proxy for "energetic"
   moments. This is intentionally rough — it's a starting point for you to
   review and adjust, not real virality detection.
-- **Captions** are burned in via ffmpeg's `subtitles` filter, generated
-  from the whisper.cpp transcript sliced to each clip's time range.
+- **Captions** are grouped into short 1-2 word phrases from whisper.cpp's
+  word-level timestamps (`src/lib/subtitles.ts`), then burned in as a native
+  `.ass` file via ffmpeg's `subtitles` filter — a plain `.srt` doesn't carry
+  its own font/size/position, so styling is instead baked directly into the
+  `.ass`'s style header, with an explicit `PlayResX`/`PlayResY` matching the
+  real output frame (without that, ffmpeg's automatic SRT→ASS conversion
+  assumes an old default design canvas and inflates the font size).
+- **Punch-zoom + whoosh** (`src/lib/zoomEffects.ts`, `src/lib/soundEffects.ts`):
+  loud/emphasis moments within a clip's own audio trigger a brief jump-cut
+  zoom-in paired with a synthesized whoosh sound. Implemented as alternating
+  "normal" and "zoomed" segments concatenated back together (ffmpeg's `crop`
+  filter only re-evaluates `x`/`y` per frame, not `w`/`h`, so a smoothly
+  *animated* zoom isn't straightforward — a jump-cut is also how a lot of
+  real short-form editing does it anyway).
 - **Export** center-crops to 9:16 and encodes with libx264/aac. Face-tracking
   crop is out of scope for this MVP.
 
