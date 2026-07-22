@@ -53,11 +53,12 @@ export async function exportVerticalClip({
   srtPath,
 }: ExportVerticalClipParams): Promise<void> {
   const cropScale = "crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=1080:1920";
-  // The subtitles path must be wrapped in its own quotes, separate from the
-  // force_style value's quotes — without it, absolute paths can trip up the
-  // filtergraph parser on some ffmpeg versions ("No option name near ...").
+  // Use the explicit `filename=` key rather than relying on positional-arg
+  // inference for the subtitles filter's first option — newer ffmpeg
+  // (8.x) rejects mixing a positional path with subsequent named options
+  // ("No option name near ..."), even when the path itself is quoted.
   const vf = srtPath
-    ? `${cropScale},subtitles='${escapeFilterPath(srtPath)}':force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Alignment=2,MarginV=80'`
+    ? `${cropScale},subtitles=filename='${escapeFilterPath(srtPath)}':force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Alignment=2,MarginV=80'`
     : cropScale;
 
   await runFfmpeg([
