@@ -98,6 +98,13 @@ See `.env.example`. The MVP needs no paid API keys — `OPENAI_API_KEY` /
   `.ass`'s style header, with an explicit `PlayResX`/`PlayResY` matching the
   real output frame (without that, ffmpeg's automatic SRT→ASS conversion
   assumes an old default design canvas and inflates the font size).
+- **Caption timing** uses whisper.cpp's DTW-aligned timestamps
+  (`src/lib/transcription.ts`) rather than its default cross-attention
+  estimation, which has a known systematic lag — captions built from the
+  default method visibly trail the actual speech. The DTW preset is derived
+  from the model filename automatically (passing the wrong one makes
+  whisper-cli hard-error), and falls back to the default timestamps for a
+  model size it doesn't recognize.
 - **Punch-zoom + whoosh** (`src/lib/zoomEffects.ts`, `src/lib/soundEffects.ts`):
   loud/emphasis moments within a clip's own audio trigger a brief jump-cut
   zoom-in paired with a synthesized whoosh sound. Implemented as alternating

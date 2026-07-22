@@ -19,6 +19,32 @@ interface WhisperJsonOutput {
   transcription: WhisperJsonSegment[];
 }
 
+const DTW_PRESETS = new Set([
+  "tiny",
+  "tiny.en",
+  "base",
+  "base.en",
+  "small",
+  "small.en",
+  "medium",
+  "medium.en",
+  "large.v1",
+  "large.v2",
+  "large.v3",
+  "large.v3.turbo",
+]);
+
+// whisper's default (cross-attention-based) word timestamps have a known
+// systematic lag — captions built from them tend to visibly trail the
+// actual speech. whisper.cpp's DTW alignment mode fixes this, but the
+// preset name must match the loaded model's size exactly or whisper-cli
+// hard-errors, so derive it from the model filename rather than guessing.
+function dtwPresetForModel(modelPath: string): string | null {
+  const match = modelPath.match(/ggml-([a-z0-9.]+)\.bin$/i);
+  const preset = match?.[1]?.toLowerCase();
+  return preset && DTW_PRESETS.has(preset) ? preset : null;
+}
+
 // Local, free, no-API-key speech-to-text via whisper.cpp. This is the seam
 // to swap for a cloud transcription API later — callers only depend on
 // TranscriptSegment[], not on whisper.cpp specifics.
@@ -29,6 +55,8 @@ export async function transcribeAudio(
     os.tmpdir(),
     `whisper-${Date.now()}-${Math.random().toString(36).slice(2)}`,
   );
+
+  const dtwPreset = dtwPresetForModel(WHISPER_MODEL_PATH);
 
   await new Promise<void>((resolve, reject) => {
     const child = spawn(WHISPER_CPP_BIN, [
@@ -53,6 +81,9 @@ export async function transcribeAudio(
       // correctly without the caller having to know the language upfront.
       "-l",
       "auto",
+      // DTW-aligned timestamps (see dtwPresetForModel) instead of the
+      // laggier default, when the model size is recognized.
+      ...(dtwPreset ? ["-dtw", dtwPreset] : []),
     ]);
     let stderr = "";
     child.stderr.on("data", (chunk) => (stderr += chunk));
