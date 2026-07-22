@@ -1,4 +1,5 @@
 import { runFfmpeg } from "@/lib/ffmpeg";
+import { isNonSpeechAnnotation } from "@/lib/subtitles";
 import type { ClipSuggestion, TranscriptSegment } from "@/types";
 
 const MIN_CLIP_SECONDS = 30;
@@ -7,6 +8,7 @@ const TARGET_CLIP_SECONDS = 45;
 const MAX_SUGGESTIONS = 6;
 const MAX_CANDIDATE_WINDOWS = 60;
 const SILENCE_SNAP_TOLERANCE = 3;
+const MIN_SPEECH_COVERAGE = 0.15;
 
 interface Interval {
   start: number;
@@ -40,17 +42,26 @@ export async function suggestClips({
     candidateWindows.map(async (window) => ({
       window,
       loudness: await measureLoudness(audioPath, window.start, window.end - window.start),
+      speechCoverage: speechCoverageFor(window, transcript),
     })),
   );
 
-  scored.sort((a, b) => b.loudness - a.loudness);
+  // Loud background music scores just as well as someone talking on a pure
+  // loudness measure, so prefer windows that actually contain speech —
+  // otherwise a music-only intro can outrank the parts people are talking.
+  // Fall back to loudness-only if nothing clears the bar (e.g. sparse or
+  // missing transcript) so suggestions are never empty because of this.
+  const speechCandidates = scored.filter((s) => s.speechCoverage >= MIN_SPEECH_COVERAGE);
+  const pool = transcript.length > 0 && speechCandidates.length > 0 ? speechCandidates : scored;
+
+  pool.sort((a, b) => b.loudness - a.loudness);
 
   // Snap to silence boundaries before dedup: snapping can shift a window's
   // edges by a few seconds, so two windows that didn't overlap pre-snap can
   // end up overlapping after — checking post-snap avoids showing the user
   // two "distinct" suggestions that actually share footage.
   const chosen: Interval[] = [];
-  for (const { window } of scored) {
+  for (const { window } of pool) {
     if (chosen.length >= MAX_SUGGESTIONS) break;
     const snapped = snapToSilence(window, silenceIntervals, durationSeconds);
     if (chosen.some((c) => overlaps(c, snapped))) continue;
@@ -134,6 +145,22 @@ function overlaps(a: Interval, b: Interval): boolean {
   return a.start < b.end && b.start < a.end;
 }
 
+// Fraction of the window's duration covered by transcript segments that
+// contain actual speech (excluding "[Music]"-style non-speech annotations).
+function speechCoverageFor(window: Interval, transcript: TranscriptSegment[]): number {
+  const windowDuration = window.end - window.start;
+  if (windowDuration <= 0) return 0;
+
+  let covered = 0;
+  for (const seg of transcript) {
+    if (isNonSpeechAnnotation(seg.text)) continue;
+    const overlapStart = Math.max(window.start, seg.start);
+    const overlapEnd = Math.min(window.end, seg.end);
+    if (overlapEnd > overlapStart) covered += overlapEnd - overlapStart;
+  }
+  return covered / windowDuration;
+}
+
 function snapToSilence(
   window: Interval,
   silences: Interval[],
@@ -170,7 +197,9 @@ function buildSuggestion(
   transcript: TranscriptSegment[],
   rationale: string,
 ): ClipSuggestion {
-  const overlapping = transcript.filter((seg) => seg.end > start && seg.start < end);
+  const overlapping = transcript.filter(
+    (seg) => seg.end > start && seg.start < end && !isNonSpeechAnnotation(seg.text),
+  );
   const text = overlapping
     .map((s) => s.text)
     .join(" ")

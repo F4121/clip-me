@@ -12,7 +12,9 @@ export function buildSrt(
       end: Math.min(clipEndSeconds - clipStartSeconds, seg.end - clipStartSeconds),
       text: seg.text.trim(),
     }))
-    .filter((seg) => seg.end > seg.start && seg.text.length > 0);
+    .filter(
+      (seg) => seg.end > seg.start && seg.text.length > 0 && !isNonSpeechAnnotation(seg.text),
+    );
 
   return relevant
     .map(
@@ -20,6 +22,17 @@ export function buildSrt(
         `${i + 1}\n${toSrtTimestamp(seg.start)} --> ${toSrtTimestamp(seg.end)}\n${seg.text}\n`,
     )
     .join("\n");
+}
+
+// Whisper labels segments with no clear speech (background music, sound
+// effects) as a bracketed/parenthesized tag like "[Music]" or "(applause)"
+// instead of transcribing words. Burning those in as captions would show
+// them as if they were spoken dialogue, so drop them.
+export function isNonSpeechAnnotation(text: string): boolean {
+  const trimmed = text.trim();
+  if (/^[[(].*[\])]$/.test(trimmed)) return true;
+  if (/^[♩-♯\s]+$/.test(trimmed)) return true; // bare music-note glyphs
+  return false;
 }
 
 function toSrtTimestamp(seconds: number): string {
