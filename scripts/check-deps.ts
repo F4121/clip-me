@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 
 const WHISPER_CPP_BIN = process.env.WHISPER_CPP_BIN ?? "whisper-cli";
-const WHISPER_MODEL_PATH = process.env.WHISPER_MODEL_PATH ?? "./models/ggml-base.en.bin";
+const WHISPER_MODEL_PATH = process.env.WHISPER_MODEL_PATH ?? "./models/ggml-base.bin";
 
 function checkBinary(name: string, cmd: string, args: string[]): Promise<boolean> {
   return new Promise((resolve) => {

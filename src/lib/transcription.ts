@@ -5,8 +5,10 @@ import os from "node:os";
 import type { TranscriptSegment } from "@/types";
 
 const WHISPER_CPP_BIN = process.env.WHISPER_CPP_BIN ?? "whisper-cli";
+// Must be a multilingual model (no ".en" suffix) — the English-only models
+// cannot transcribe Indonesian (or any other language) at all.
 const WHISPER_MODEL_PATH =
-  process.env.WHISPER_MODEL_PATH ?? "./models/ggml-base.en.bin";
+  process.env.WHISPER_MODEL_PATH ?? "./models/ggml-base.bin";
 
 interface WhisperJsonSegment {
   offsets: { from: number; to: number };
@@ -45,6 +47,12 @@ export async function transcribeAudio(
       "-ml",
       "1",
       "-sow",
+      // whisper.cpp otherwise defaults to assuming English regardless of
+      // the model — auto-detect so English and Indonesian (or anything
+      // else the multilingual model supports) are both transcribed
+      // correctly without the caller having to know the language upfront.
+      "-l",
+      "auto",
     ]);
     let stderr = "";
     child.stderr.on("data", (chunk) => (stderr += chunk));

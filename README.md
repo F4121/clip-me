@@ -1,7 +1,8 @@
 # Clip Me
 
 Turn a long YouTube video into a handful of short (30–60s), vertical,
-caption-burned clips.
+caption-burned clips. Transcription auto-detects the spoken language
+(English, Indonesian, and anything else the whisper.cpp model supports).
 
 Paste a YouTube URL and the app will:
 
@@ -52,7 +53,10 @@ cp .env.example .env
 npx prisma migrate dev
 
 # Download the local transcription model (~140MB, free, no key)
-./scripts/download-model.sh base.en
+# "base" is multilingual (auto-detects the spoken language, e.g. English or
+# Indonesian). Pass "small" instead for meaningfully better non-English
+# accuracy, at the cost of a larger download and slower transcription.
+./scripts/download-model.sh base
 
 npm run check-deps   # verifies ffmpeg / yt-dlp / whisper-cli / model are all found
 
