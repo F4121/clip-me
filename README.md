@@ -77,6 +77,38 @@ See `.env.example`. The MVP needs no paid API keys — `OPENAI_API_KEY` /
 | `NEXTAUTH_URL` | Base URL, `http://localhost:3000` for local dev |
 | `WHISPER_CPP_BIN` | Path to your whisper.cpp `whisper-cli` binary |
 | `WHISPER_MODEL_PATH` | Path to the downloaded ggml model file |
+| `WHISPER_LANGUAGE` | Defaults to `auto` (detect per video). Set to a language code (e.g. `id`, `en`) to skip detection — see [Improving transcription accuracy](#improving-transcription-accuracy) |
+
+## Improving transcription accuracy
+
+If captions come out wrong (words, not just timing), try these in order:
+
+1. **Force the language instead of `auto`.** Auto-detect only looks at the
+   first ~30s of audio and uses that guess for the whole file — a
+   music/non-speech intro, or a video that briefly opens in a different
+   language, can lock in the wrong language for everything after it. If most
+   of your videos are a known language, set `WHISPER_LANGUAGE` (e.g. `id`
+   for Indonesian) in `.env` and skip this failure mode entirely.
+2. **Upgrade the model** if `base` isn't accurate enough, especially for
+   non-English audio (smaller Whisper models are noticeably weaker on
+   lower-resource languages than on English):
+   ```bash
+   ./scripts/download-model.sh small   # ~470MB, meaningfully better accuracy
+   ```
+   then set `WHISPER_MODEL_PATH=./models/ggml-small.bin` in `.env`. `medium`
+   (~1.5GB) is better still if your machine can handle the extra transcription
+   time.
+3. **Background music/noise and overlapping speakers** degrade any Whisper
+   model's accuracy — this is a fundamental limitation of the approach, not
+   something size or language settings fix. The audio fed to whisper.cpp is
+   automatically run through a light denoise filter first (`src/lib/
+   transcription.ts`), which helps somewhat with broadband noise, but won't
+   remove music that overlaps the speech frequency range.
+
+Any of these require re-transcribing — resubmit the video's URL to get a
+fresh transcript. (Contrast with the caption-timing polish described below,
+which is applied at export time and so already benefits existing transcripts
+without resubmitting anything.)
 
 ## How it works
 

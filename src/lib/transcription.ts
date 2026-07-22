@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import { runFfmpeg } from "@/lib/ffmpeg";
 import type { TranscriptSegment } from "@/types";
 
 const WHISPER_CPP_BIN = process.env.WHISPER_CPP_BIN ?? "whisper-cli";
@@ -9,6 +10,13 @@ const WHISPER_CPP_BIN = process.env.WHISPER_CPP_BIN ?? "whisper-cli";
 // cannot transcribe Indonesian (or any other language) at all.
 const WHISPER_MODEL_PATH =
   process.env.WHISPER_MODEL_PATH ?? "./models/ggml-base.bin";
+// "auto" only looks at the first ~30s of audio to guess the language, then
+// uses that guess for the entire file — a music/non-speech intro (or a
+// clip that opens in a different language than the rest) can lock in the
+// wrong language for everything after it. If most of your videos are a
+// known language, set this explicitly (e.g. "id" for Indonesian) to skip
+// detection entirely.
+const WHISPER_LANGUAGE = process.env.WHISPER_LANGUAGE ?? "auto";
 
 interface WhisperJsonSegment {
   offsets: { from: number; to: number };
@@ -45,6 +53,35 @@ function dtwPresetForModel(modelPath: string): string | null {
   return preset && DTW_PRESETS.has(preset) ? preset : null;
 }
 
+// Background music/noise is one of the biggest real-world drivers of bad
+// transcription, independent of model size. A highpass+FFT-denoise+lowpass
+// chain won't remove music that overlaps speech frequencies, but it
+// measurably helps by cutting broadband noise and out-of-speech-range
+// rumble before whisper ever sees the audio. Only used for the copy fed to
+// whisper — the plain extracted audio.wav (used for clip-suggestion and
+// zoom-moment loudness analysis) is left untouched so this can't skew
+// those unrelated heuristics.
+async function denoiseForTranscription(audioPath: string): Promise<string> {
+  const denoisedPath = path.join(
+    os.tmpdir(),
+    `whisper-denoised-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`,
+  );
+  await runFfmpeg([
+    "-i",
+    audioPath,
+    "-af",
+    "highpass=f=100,afftdn=nf=-25,lowpass=f=8000",
+    "-ar",
+    "16000",
+    "-ac",
+    "1",
+    "-c:a",
+    "pcm_s16le",
+    denoisedPath,
+  ]);
+  return denoisedPath;
+}
+
 // Local, free, no-API-key speech-to-text via whisper.cpp. This is the seam
 // to swap for a cloud transcription API later — callers only depend on
 // TranscriptSegment[], not on whisper.cpp specifics.
@@ -57,56 +94,60 @@ export async function transcribeAudio(
   );
 
   const dtwPreset = dtwPresetForModel(WHISPER_MODEL_PATH);
+  const denoisedPath = await denoiseForTranscription(audioPath);
 
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(WHISPER_CPP_BIN, [
-      "-m",
-      WHISPER_MODEL_PATH,
-      "-f",
-      audioPath,
-      "-oj",
-      "-of",
-      outputBase,
-      "-np",
-      "-nt",
-      // Force near-word-level segmentation (rather than whole sentences) so
-      // captions can be grouped into short, punchy phrases with tight
-      // per-word timing instead of one long line per sentence.
-      "-ml",
-      "1",
-      "-sow",
-      // whisper.cpp otherwise defaults to assuming English regardless of
-      // the model — auto-detect so English and Indonesian (or anything
-      // else the multilingual model supports) are both transcribed
-      // correctly without the caller having to know the language upfront.
-      "-l",
-      "auto",
-      // DTW-aligned timestamps (see dtwPresetForModel) instead of the
-      // laggier default, when the model size is recognized.
-      ...(dtwPreset ? ["-dtw", dtwPreset] : []),
-    ]);
-    let stderr = "";
-    child.stderr.on("data", (chunk) => (stderr += chunk));
-    child.on("error", (err) => {
-      reject(new Error(`Failed to spawn whisper-cli: ${err.message}`));
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(WHISPER_CPP_BIN, [
+        "-m",
+        WHISPER_MODEL_PATH,
+        "-f",
+        denoisedPath,
+        "-oj",
+        "-of",
+        outputBase,
+        "-np",
+        "-nt",
+        // Force near-word-level segmentation (rather than whole sentences) so
+        // captions can be grouped into short, punchy phrases with tight
+        // per-word timing instead of one long line per sentence.
+        "-ml",
+        "1",
+        "-sow",
+        // whisper.cpp otherwise defaults to assuming English regardless of
+        // the model — see WHISPER_LANGUAGE above for the tradeoffs of auto
+        // vs forcing a specific language.
+        "-l",
+        WHISPER_LANGUAGE,
+        // DTW-aligned timestamps (see dtwPresetForModel) instead of the
+        // laggier default, when the model size is recognized.
+        ...(dtwPreset ? ["-dtw", dtwPreset] : []),
+      ]);
+      let stderr = "";
+      child.stderr.on("data", (chunk) => (stderr += chunk));
+      child.on("error", (err) => {
+        reject(new Error(`Failed to spawn whisper-cli: ${err.message}`));
+      });
+      child.on("close", (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`whisper-cli exited with code ${code}: ${stderr.slice(-4000)}`));
+        }
+      });
     });
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`whisper-cli exited with code ${code}: ${stderr.slice(-4000)}`));
-      }
-    });
-  });
 
-  const jsonPath = `${outputBase}.json`;
-  const raw = await fs.readFile(jsonPath, "utf-8");
-  const data = JSON.parse(raw) as WhisperJsonOutput;
-  await fs.unlink(jsonPath).catch(() => {});
+    const jsonPath = `${outputBase}.json`;
+    const raw = await fs.readFile(jsonPath, "utf-8");
+    const data = JSON.parse(raw) as WhisperJsonOutput;
+    await fs.unlink(jsonPath).catch(() => {});
 
-  return data.transcription.map((segment) => ({
-    start: segment.offsets.from / 1000,
-    end: segment.offsets.to / 1000,
-    text: segment.text.trim(),
-  }));
+    return data.transcription.map((segment) => ({
+      start: segment.offsets.from / 1000,
+      end: segment.offsets.to / 1000,
+      text: segment.text.trim(),
+    }));
+  } finally {
+    await fs.unlink(denoisedPath).catch(() => {});
+  }
 }
