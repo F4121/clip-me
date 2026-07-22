@@ -104,7 +104,14 @@ See `.env.example`. The MVP needs no paid API keys — `OPENAI_API_KEY` /
   default method visibly trail the actual speech. The DTW preset is derived
   from the model filename automatically (passing the wrong one makes
   whisper-cli hard-error), and falls back to the default timestamps for a
-  model size it doesn't recognize.
+  model size it doesn't recognize. On top of that, export-time timing polish
+  (`polishCaptionTiming` in `src/lib/subtitles.ts`) mirrors what short-form
+  caption tools do: each phrase appears ~180ms before its word is spoken
+  (viewers read "slightly early" as in-sync and "slightly late" as lagging),
+  phrases hold on screen until the next one starts when the gap is under 1s
+  (continuous captions, no flicker), and very short words get a minimum
+  display duration — while long pauses (music, silence) still clear the
+  screen instead of letting a caption linger.
 - **Punch-zoom + whoosh** (`src/lib/zoomEffects.ts`, `src/lib/soundEffects.ts`):
   loud/emphasis moments within a clip's own audio trigger a brief jump-cut
   zoom-in paired with a synthesized whoosh sound. Implemented as alternating

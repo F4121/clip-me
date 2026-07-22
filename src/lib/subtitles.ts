@@ -70,19 +70,41 @@ function clipRelativeSegments(
     );
 }
 
-export function buildSrt(
-  segments: TranscriptSegment[],
-  clipStartSeconds: number,
-  clipEndSeconds: number,
-): string {
-  const relevant = clipRelativeSegments(segments, clipStartSeconds, clipEndSeconds);
+// Timing polish that mirrors what polished short-form caption tools do.
+// Whisper timestamps — even DTW-aligned ones — retain a residual lag on
+// real-world audio, and viewers read "caption slightly after speech onset"
+// as late while "slightly before" reads as in-sync. So:
+//   1. Shift each phrase's start earlier by a small fixed lead.
+//   2. If the gap to the next phrase is small, hold the current phrase on
+//      screen until the next one starts — continuous captions, no flicker.
+//   3. Enforce a minimum display duration so single short words don't blink.
+// Starts never overlap the previous phrase and ends never cross the next
+// phrase's (already-shifted) start, so ordering is preserved.
+const CAPTION_LEAD_SECONDS = 0.18;
+const MAX_HOLD_GAP_SECONDS = 1.0;
+const MIN_DISPLAY_SECONDS = 0.35;
 
-  return relevant
-    .map(
-      (seg, i) =>
-        `${i + 1}\n${toSrtTimestamp(seg.start)} --> ${toSrtTimestamp(seg.end)}\n${seg.text}\n`,
-    )
-    .join("\n");
+function polishCaptionTiming(
+  segments: ClipRelativeSegment[],
+  clipDurationSeconds: number,
+): ClipRelativeSegment[] {
+  const polished = segments.map((seg) => ({ ...seg }));
+
+  for (let i = 0; i < polished.length; i++) {
+    const floor = i > 0 ? polished[i - 1].start + 0.01 : 0;
+    polished[i].start = Math.max(floor, polished[i].start - CAPTION_LEAD_SECONDS);
+  }
+
+  for (let i = 0; i < polished.length; i++) {
+    const nextStart = i + 1 < polished.length ? polished[i + 1].start : clipDurationSeconds;
+    let end = Math.max(polished[i].end, polished[i].start + MIN_DISPLAY_SECONDS);
+    if (nextStart - polished[i].end <= MAX_HOLD_GAP_SECONDS) {
+      end = nextStart;
+    }
+    polished[i].end = Math.min(Math.max(end, polished[i].start + 0.05), nextStart, clipDurationSeconds);
+  }
+
+  return polished.filter((seg) => seg.end > seg.start);
 }
 
 // PlayResX/PlayResY must match the actual export frame (1080x1920): when
@@ -102,7 +124,10 @@ export function buildAss(
   clipStartSeconds: number,
   clipEndSeconds: number,
 ): string {
-  const relevant = clipRelativeSegments(segments, clipStartSeconds, clipEndSeconds);
+  const relevant = polishCaptionTiming(
+    clipRelativeSegments(segments, clipStartSeconds, clipEndSeconds),
+    clipEndSeconds - clipStartSeconds,
+  );
   if (relevant.length === 0) return "";
 
   const header =
@@ -154,15 +179,6 @@ function toAssTimestamp(seconds: number): string {
   const s = Math.floor((totalCs % 6_000) / 100);
   const cs = totalCs % 100;
   return `${h}:${pad(m, 2)}:${pad(s, 2)}.${pad(cs, 2)}`;
-}
-
-function toSrtTimestamp(seconds: number): string {
-  const totalMs = Math.round(seconds * 1000);
-  const h = Math.floor(totalMs / 3_600_000);
-  const m = Math.floor((totalMs % 3_600_000) / 60_000);
-  const s = Math.floor((totalMs % 60_000) / 1000);
-  const ms = totalMs % 1000;
-  return `${pad(h, 2)}:${pad(m, 2)}:${pad(s, 2)},${pad(ms, 3)}`;
 }
 
 function pad(n: number, width: number): string {
