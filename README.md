@@ -1,8 +1,8 @@
 # Clip Me
 
-Turn a long YouTube video into a handful of short (30–60s), vertical,
-caption-burned clips. Transcription auto-detects the spoken language
-(English, Indonesian, and anything else the whisper.cpp model supports).
+Turn a long YouTube video into a handful of short (30–60s), vertical clips.
+Transcription auto-detects the spoken language (English, Indonesian, and
+anything else the whisper.cpp model supports).
 
 Paste a YouTube URL and the app will:
 
@@ -11,11 +11,17 @@ Paste a YouTube URL and the app will:
 3. Suggest a few 30–60s candidate clips using a free audio heuristic
    (silence + loudness analysis — no LLM)
 4. Let you preview and trim each suggestion on a timeline
-5. Export a vertical (9:16) MP4 with:
-   - Bold, word-by-word "punch" captions (short phrases, not full sentences)
-   - A brief punch-zoom + whoosh sound effect on loud/emphasis moments
+5. Export a vertical (9:16) MP4 with a brief punch-zoom + whoosh sound
+   effect on loud/emphasis moments
 
 Everything runs locally. No paid API keys are required for this MVP.
+
+**Captions are not burned into the export.** Free local transcription isn't
+reliable enough on real-world audio (background music, multiple speakers)
+to trust as final, on-screen text — see
+[Improving transcription accuracy](#improving-transcription-accuracy) if you
+want to try anyway, or [Captions (currently disabled)](#captions-currently-disabled)
+for how to re-enable burning them in.
 
 ## Prerequisites
 
@@ -106,9 +112,36 @@ If captions come out wrong (words, not just timing), try these in order:
    remove music that overlaps the speech frequency range.
 
 Any of these require re-transcribing — resubmit the video's URL to get a
-fresh transcript. (Contrast with the caption-timing polish described below,
-which is applied at export time and so already benefits existing transcripts
-without resubmitting anything.)
+fresh transcript.
+
+## Captions (currently disabled)
+
+Burned-in captions were tried and turned off by default — free local
+transcription (see above) wasn't reliable enough on real-world audio to
+trust as permanent on-screen text, and manually correcting a wrong caption
+that's already baked into the video is worse than just adding captions
+yourself in an editor afterward.
+
+The caption pipeline itself is still in the codebase, just unwired from
+export (`src/lib/subtitles.ts`, `src/lib/jobs/runners/exportClip.ts`):
+
+- Whisper's word-level timestamps are grouped into short 1-2 word phrases
+  and rendered as a native `.ass` file (not `.srt` — styling like font/size/
+  position needs to be baked into the file itself, with an explicit
+  `PlayResX`/`PlayResY` matching the real output frame, or ffmpeg's
+  automatic SRT→ASS conversion inflates the font size unpredictably).
+- Timing uses whisper.cpp's DTW-aligned timestamps rather than its default
+  (laggier) cross-attention estimation, plus export-time polish
+  (`polishCaptionTiming`): each phrase appears ~180ms before its word is
+  spoken, phrases hold on screen until the next one starts when the gap is
+  under 1s, and short words get a minimum display duration.
+
+To re-enable: in `runExportClip` (`src/lib/jobs/runners/exportClip.ts`),
+replace the `assPath = null` line with the caption-building block (build
+the phrases from `sourceVideo.transcript` via `groupIntoCaptionPhrases`,
+write the result of `buildAss` to `exportedClipCaptionsPath`, pass that path
+as `assPath`) — everything downstream in `exportVerticalClip` already
+supports it.
 
 ## How it works
 
@@ -123,27 +156,15 @@ without resubmitting anything.)
   `volumedetect` over candidate windows is used as a proxy for "energetic"
   moments. This is intentionally rough — it's a starting point for you to
   review and adjust, not real virality detection.
-- **Captions** are grouped into short 1-2 word phrases from whisper.cpp's
-  word-level timestamps (`src/lib/subtitles.ts`), then burned in as a native
-  `.ass` file via ffmpeg's `subtitles` filter — a plain `.srt` doesn't carry
-  its own font/size/position, so styling is instead baked directly into the
-  `.ass`'s style header, with an explicit `PlayResX`/`PlayResY` matching the
-  real output frame (without that, ffmpeg's automatic SRT→ASS conversion
-  assumes an old default design canvas and inflates the font size).
-- **Caption timing** uses whisper.cpp's DTW-aligned timestamps
+- **Transcription** uses whisper.cpp's DTW-aligned timestamps
   (`src/lib/transcription.ts`) rather than its default cross-attention
-  estimation, which has a known systematic lag — captions built from the
-  default method visibly trail the actual speech. The DTW preset is derived
-  from the model filename automatically (passing the wrong one makes
-  whisper-cli hard-error), and falls back to the default timestamps for a
-  model size it doesn't recognize. On top of that, export-time timing polish
-  (`polishCaptionTiming` in `src/lib/subtitles.ts`) mirrors what short-form
-  caption tools do: each phrase appears ~180ms before its word is spoken
-  (viewers read "slightly early" as in-sync and "slightly late" as lagging),
-  phrases hold on screen until the next one starts when the gap is under 1s
-  (continuous captions, no flicker), and very short words get a minimum
-  display duration — while long pauses (music, silence) still clear the
-  screen instead of letting a caption linger.
+  estimation, which has a known systematic lag, plus a denoise pass to help
+  with background music/noise — see
+  [Improving transcription accuracy](#improving-transcription-accuracy). The
+  transcript isn't burned into the export (see
+  [Captions](#captions-currently-disabled)) but is still used for clip
+  titles and for weighting suggestions toward windows that contain actual
+  speech, not just loud music.
 - **Punch-zoom + whoosh** (`src/lib/zoomEffects.ts`, `src/lib/soundEffects.ts`):
   loud/emphasis moments within a clip's own audio trigger a brief jump-cut
   zoom-in paired with a synthesized whoosh sound. Implemented as alternating

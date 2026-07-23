@@ -1,16 +1,10 @@
 import fs from "node:fs/promises";
 import { db } from "@/lib/db";
 import { ExportedClipStatus } from "@prisma/client";
-import { buildAss, groupIntoCaptionPhrases } from "@/lib/subtitles";
 import { exportVerticalClip } from "@/lib/ffmpeg";
 import { detectZoomMoments } from "@/lib/zoomEffects";
 import { ensureWhooshSfx } from "@/lib/soundEffects";
-import {
-  exportedClipDir,
-  exportedClipCaptionsPath,
-  exportedClipOutputPath,
-} from "@/lib/paths";
-import type { TranscriptSegment } from "@/types";
+import { exportedClipDir, exportedClipOutputPath } from "@/lib/paths";
 
 export async function runExportClip(exportedClipId: string): Promise<void> {
   const exportedClip = await db.exportedClip.findUniqueOrThrow({
@@ -33,16 +27,12 @@ export async function runExportClip(exportedClipId: string): Promise<void> {
 
     const clipDurationSeconds = exportedClip.endSeconds - exportedClip.startSeconds;
 
-    let assPath: string | null = null;
-    if (sourceVideo.transcript) {
-      const words: TranscriptSegment[] = JSON.parse(sourceVideo.transcript);
-      const phrases = groupIntoCaptionPhrases(words);
-      const ass = buildAss(phrases, exportedClip.startSeconds, exportedClip.endSeconds);
-      if (ass.trim().length > 0) {
-        assPath = exportedClipCaptionsPath(exportedClipId);
-        await fs.writeFile(assPath, ass, "utf-8");
-      }
-    }
+    // Captions are not burned in — transcription accuracy on real-world
+    // audio (background music, multiple speakers) wasn't reliable enough,
+    // and the user prefers to add captions manually in their own editor.
+    // Zoom + whoosh stay: both are driven by audio loudness analysis, not
+    // transcript content, so they're unaffected by transcription accuracy.
+    const assPath: string | null = null;
 
     let zoomTimestamps: number[] = [];
     let whooshPath: string | null = null;
