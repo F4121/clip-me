@@ -2,8 +2,6 @@ import fs from "node:fs/promises";
 import { db } from "@/lib/db";
 import { ExportedClipStatus } from "@prisma/client";
 import { exportVerticalClip } from "@/lib/ffmpeg";
-import { detectZoomMoments } from "@/lib/zoomEffects";
-import { ensureWhooshSfx } from "@/lib/soundEffects";
 import { exportedClipDir, exportedClipOutputPath } from "@/lib/paths";
 
 export async function runExportClip(exportedClipId: string): Promise<void> {
@@ -27,25 +25,17 @@ export async function runExportClip(exportedClipId: string): Promise<void> {
 
     const clipDurationSeconds = exportedClip.endSeconds - exportedClip.startSeconds;
 
-    // Captions are not burned in — transcription accuracy on real-world
-    // audio (background music, multiple speakers) wasn't reliable enough,
-    // and the user prefers to add captions manually in their own editor.
-    // Zoom + whoosh stay: both are driven by audio loudness analysis, not
-    // transcript content, so they're unaffected by transcription accuracy.
+    // Captions, punch-zoom, and whoosh sfx are all disabled by request —
+    // export is a plain crop/scale with the original audio untouched.
+    // Zoom+whoosh required mixing the original audio through ffmpeg's
+    // `amix`, which auto-reduces overall volume to avoid clipping even
+    // though the whoosh itself is silent almost the whole clip — audible
+    // as "quieter than the original". Skipping that path entirely (rather
+    // than tuning amix's normalize/weights) avoids the volume loss and is
+    // simplest to reason about, matching plain audio passthrough exactly.
     const assPath: string | null = null;
-
-    let zoomTimestamps: number[] = [];
-    let whooshPath: string | null = null;
-    if (sourceVideo.localAudioPath) {
-      zoomTimestamps = await detectZoomMoments(
-        sourceVideo.localAudioPath,
-        exportedClip.startSeconds,
-        clipDurationSeconds,
-      );
-      if (zoomTimestamps.length > 0) {
-        whooshPath = await ensureWhooshSfx();
-      }
-    }
+    const zoomTimestamps: number[] = [];
+    const whooshPath: string | null = null;
 
     const outputPath = exportedClipOutputPath(exportedClipId);
     await exportVerticalClip({

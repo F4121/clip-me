@@ -11,17 +11,14 @@ Paste a YouTube URL and the app will:
 3. Suggest a few 30–60s candidate clips using a free audio heuristic
    (silence + loudness analysis — no LLM)
 4. Let you preview and trim each suggestion on a timeline
-5. Export a vertical (9:16) MP4 with a brief punch-zoom + whoosh sound
-   effect on loud/emphasis moments
+5. Export a plain vertical (9:16) MP4, original audio untouched
 
 Everything runs locally. No paid API keys are required for this MVP.
 
-**Captions are not burned into the export.** Free local transcription isn't
-reliable enough on real-world audio (background music, multiple speakers)
-to trust as final, on-screen text — see
-[Improving transcription accuracy](#improving-transcription-accuracy) if you
-want to try anyway, or [Captions (currently disabled)](#captions-currently-disabled)
-for how to re-enable burning them in.
+**Captions, punch-zoom, and whoosh sfx are not applied to the export** —
+see [Captions (currently disabled)](#captions-currently-disabled) and
+[Punch-zoom + whoosh (currently disabled)](#punch-zoom--whoosh-currently-disabled)
+for why and how to turn them back on.
 
 ## Prerequisites
 
@@ -143,6 +140,37 @@ write the result of `buildAss` to `exportedClipCaptionsPath`, pass that path
 as `assPath`) — everything downstream in `exportVerticalClip` already
 supports it.
 
+## Punch-zoom + whoosh (currently disabled)
+
+Also turned off by default, for a more concrete reason: mixing in the
+whoosh sound required ffmpeg's `amix` filter, which auto-reduces overall
+volume to avoid clipping — and it does this for the *entire* clip, not just
+where the whoosh plays, even though the whoosh itself is silent almost the
+whole time. The result was audibly quieter (~20dB, roughly a 10x perceived
+loudness drop) than the original audio throughout, not just at zoom
+moments. Rather than trying to tune `amix`'s normalize/weighting to
+compensate, the simplest fix was to skip that code path entirely — export
+now leaves the original audio completely untouched.
+
+The effect itself is still in the codebase (`src/lib/zoomEffects.ts`,
+`src/lib/soundEffects.ts`):
+
+- `detectZoomMoments` finds loud/emphasis spikes within a clip's own audio.
+- Punch-zoom is a jump-cut (not a smooth animated zoom — ffmpeg's `crop`
+  filter only re-evaluates `x`/`y` per frame, not `w`/`h`), implemented as
+  alternating "normal" and "zoomed" segments concatenated back together.
+- `ensureWhooshSfx` synthesizes a short percussive noise burst locally
+  (free, no sound-effect asset/license needed).
+
+To re-enable: in `runExportClip`, replace the `zoomTimestamps`/`whooshPath`
+constants with the detection calls (see git history for the exact code —
+`detectZoomMoments(sourceVideo.localAudioPath, ...)` then `ensureWhooshSfx()`
+when it finds any moments), and fix the volume issue first — e.g. mix the
+whoosh in with `amix=normalize=0` plus its own explicit `volume` filter
+instead of relying on `amix`'s automatic weighting, or use `sidechaincompress`
+to duck the original audio only briefly around each whoosh instead of
+flattening it for the whole clip.
+
 ## How it works
 
 - **Processing pipeline**: an in-process job queue (`src/lib/jobs/queue.ts`)
@@ -165,15 +193,10 @@ supports it.
   [Captions](#captions-currently-disabled)) but is still used for clip
   titles and for weighting suggestions toward windows that contain actual
   speech, not just loud music.
-- **Punch-zoom + whoosh** (`src/lib/zoomEffects.ts`, `src/lib/soundEffects.ts`):
-  loud/emphasis moments within a clip's own audio trigger a brief jump-cut
-  zoom-in paired with a synthesized whoosh sound. Implemented as alternating
-  "normal" and "zoomed" segments concatenated back together (ffmpeg's `crop`
-  filter only re-evaluates `x`/`y` per frame, not `w`/`h`, so a smoothly
-  *animated* zoom isn't straightforward — a jump-cut is also how a lot of
-  real short-form editing does it anyway).
-- **Export** center-crops to 9:16 and encodes with libx264/aac. Face-tracking
-  crop is out of scope for this MVP.
+- **Export** center-crops to 9:16 and encodes with libx264/aac, original
+  audio untouched. Face-tracking crop is out of scope for this MVP. Punch-
+  zoom/whoosh are implemented but disabled — see
+  [Punch-zoom + whoosh](#punch-zoom--whoosh-currently-disabled).
 
 ## Known limitations (MVP)
 
